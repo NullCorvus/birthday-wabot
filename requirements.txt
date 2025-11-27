@@ -1,0 +1,4 @@
+customtkinter
+tkcalendar
+selenium
+webdriver_manager
