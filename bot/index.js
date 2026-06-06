@@ -1,0 +1,113 @@
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+console.log('Iniciando el bot de WhatsApp...');
+
+// Buscar ruta del navegador instalado en el sistema para evitar descargas corruptas de Puppeteer
+const getChromePath = () => {
+    const paths = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+    ];
+    for (const p of paths) {
+        if (fs.existsSync(p)) {
+            console.log(`Usando navegador del sistema encontrado en: ${p}`);
+            return p;
+        }
+    }
+    return undefined;
+};
+
+// Configuración compatible con Windows y Linux (incluyendo entornos sin sandbox)
+const client = new Client({
+    authStrategy: new LocalAuth({
+        clientId: "birthday-wabot-session"
+    }),
+    webVersion: '2.2412.54',
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+    },
+    puppeteer: {
+        headless: true,
+        executablePath: getChromePath(),
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
+    }
+});
+
+client.on('loading_screen', (percent, message) => {
+    console.log(`Cargando WhatsApp Web: ${percent}% - ${message}`);
+});
+
+client.on('qr', (qr) => {
+    console.log('\n==================================================================');
+    console.log('Escanea este código QR con tu aplicación de WhatsApp (Dispositivos Vinculados):');
+    console.log('==================================================================\n');
+    qrcode.generate(qr, { small: true });
+});
+
+client.on('auth_failure', (msg) => {
+    console.error('Fallo en la autenticación:', msg);
+});
+
+let birthdaysProcessed = false;
+
+async function runBirthdayCheck(client) {
+    if (birthdaysProcessed) return;
+    birthdaysProcessed = true;
+    console.log('\n📋 Ejecutando revisión de cumpleaños...');
+    try {
+        const { processBirthdays } = require('./scheduler');
+        await processBirthdays(client);
+    } catch (err) {
+        console.error('Error en revisión de cumpleaños:', err);
+    }
+}
+
+client.on('ready', async () => {
+    console.log('\n=========================================');
+    console.log('¡El cliente de WhatsApp está listo!');
+    console.log('=========================================\n');
+    
+    const { startScheduler, processBirthdays } = require('./scheduler');
+    startScheduler(client);
+    await runBirthdayCheck(client);
+});
+
+// Fallback: si ready no se dispara, procesar igual cuando esté autenticado
+client.on('authenticated', () => {
+    console.log('¡Autenticado con éxito en WhatsApp!');
+    setTimeout(() => {
+        if (!birthdaysProcessed) {
+            console.log('⚠️  ready no se disparó, ejecutando revisión igual...');
+            runBirthdayCheck(client);
+        }
+    }, 15000);
+});
+
+client.on('disconnected', (reason) => {
+    console.log('El cliente se desconectó:', reason);
+});
+
+// Matar procesos Chrome huerfanos que aun tengan el lock del userDataDir
+const SESSION_DIR = path.join(__dirname, '.wwebjs_auth', 'session-birthday-wabot-session');
+try { require('child_process').execSync(`pkill -f "${SESSION_DIR}" 2>/dev/null`); } catch {}
+try { require('child_process').execSync(`pkill -f "chrome.*birthday-wabot" 2>/dev/null`); } catch {}
+
+console.log('Llamando a client.initialize()...');
+client.initialize();
