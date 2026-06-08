@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Contacto {
+  id               Int      @id @default(autoincrement())
+  nombre           String
+  numero           String
+  fecha_nacimiento DateTime @map("fecha_nacimiento")
+  activo           Boolean  @default(true)
+  created_at       DateTime @default(now())
+
+  logs Log[]
+
+  @@map("contactos")
+}
+
+model Log {
+  id               Int      @id @default(autoincrement())
+  contacto_id      Int
+  mensaje          String
+  fecha_hora_envio DateTime @default(now())
+  estado           String   @default("Abierto")
+  detalle          String?
+
+  contacto Contacto @relation(fields: [contacto_id], references: [id])
+
+  @@map("log")
+}
+
+model Mensajetxt {
+  id     Int    @id @default(autoincrement())
+  nombre String
+  texto  String
+
+  @@map("mensajetxt")
+}

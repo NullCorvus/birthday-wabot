@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Prisma
+prisma/migrations/
+
+# Python legacy
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WhatsApp session
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Docker
+pgdata/
+
+# IDE
+.vscode/
+.idea/
+
+/generated/prisma
