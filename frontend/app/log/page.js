@@ -1,6 +1,8 @@
 import LogTable from "../../components/LogTable";
 import { prisma } from "../../lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Historial() {
   const dbLogs = await prisma.log.findMany({
     include: { contacto: true },

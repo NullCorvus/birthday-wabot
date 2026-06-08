@@ -2,6 +2,8 @@ import StatCard from "../components/StatCard";
 import LogTable from "../components/LogTable";
 import { prisma } from "../lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Dashboard() {
   const activeContactsCount = await prisma.contacto.count({
     where: { activo: true }

@@ -1,6 +1,8 @@
 import ContactTable from "../../components/ContactTable";
 import { prisma } from "../../lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Contactos() {
   const dbContacts = await prisma.contacto.findMany({
     orderBy: { id: 'desc' }

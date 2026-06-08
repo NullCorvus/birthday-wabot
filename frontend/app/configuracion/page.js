@@ -1,6 +1,8 @@
 import ConfiguracionForm from "./ConfiguracionForm";
 import { prisma } from "../../lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 export default async function Configuracion() {
   // Try to find the first template
   let template = await prisma.mensajetxt.findFirst();
