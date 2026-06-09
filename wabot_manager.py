@@ -334,10 +334,10 @@ class WabotManagerApp(ctk.CTk):
             return
         self.update_task_ui(2, 'done')
         
-        # 3. Prisma DB Push
+        # 3. Prisma DB Push (usar DIRECT_URL temporalmente como DATABASE_URL)
         self.update_task_ui(3, 'running')
         env = os.environ.copy()
-        env['DIRECT_URL'] = self.direct_url_var.get()
+        env['DATABASE_URL'] = self.direct_url_var.get()
         if self.run_command("npx prisma db push --accept-data-loss", cwd=INSTALL_DIR, env=env) != 0:
             self.update_task_ui(3, 'error')
             return
