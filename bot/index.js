@@ -54,11 +54,22 @@ client.on('loading_screen', (percent, message) => {
     console.log(`Cargando WhatsApp Web: ${percent}% - ${message}`);
 });
 
+const qrcodeImage = require('qrcode');
+
 client.on('qr', (qr) => {
     console.log('\n==================================================================');
     console.log('Escanea este código QR con tu aplicación de WhatsApp (Dispositivos Vinculados):');
     console.log('==================================================================\n');
     qrcode.generate(qr, { small: true });
+    
+    // Guardar imagen y actualizar estado para la interfaz gráfica
+    const qrPath = path.join(__dirname, 'qr.png');
+    qrcodeImage.toFile(qrPath, qr, { width: 300 }, (err) => {
+        if (!err) console.log('✅ QR guardado como imagen para la GUI.');
+    });
+    
+    const statusPath = path.join(__dirname, 'status.json');
+    fs.writeFileSync(statusPath, JSON.stringify({ state: 'qr_ready', timestamp: Date.now() }));
 });
 
 client.on('auth_failure', (msg) => {
@@ -84,6 +95,12 @@ client.on('ready', async () => {
     console.log('¡El cliente de WhatsApp está listo!');
     console.log('=========================================\n');
     
+    // Eliminar QR viejo y actualizar estado
+    const qrPath = path.join(__dirname, 'qr.png');
+    if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+    const statusPath = path.join(__dirname, 'status.json');
+    fs.writeFileSync(statusPath, JSON.stringify({ state: 'running', timestamp: Date.now() }));
+    
     const { startScheduler, processBirthdays } = require('./scheduler');
     startScheduler(client);
     await runBirthdayCheck(client);
@@ -92,6 +109,13 @@ client.on('ready', async () => {
 // Fallback: si ready no se dispara, procesar igual cuando esté autenticado
 client.on('authenticated', () => {
     console.log('¡Autenticado con éxito en WhatsApp!');
+    
+    // Eliminar QR viejo y actualizar estado
+    const qrPath = path.join(__dirname, 'qr.png');
+    if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+    const statusPath = path.join(__dirname, 'status.json');
+    fs.writeFileSync(statusPath, JSON.stringify({ state: 'running', timestamp: Date.now() }));
+    
     setTimeout(() => {
         if (!birthdaysProcessed) {
             console.log('⚠️  ready no se disparó, ejecutando revisión igual...');
@@ -102,12 +126,18 @@ client.on('authenticated', () => {
 
 client.on('disconnected', (reason) => {
     console.log('El cliente se desconectó:', reason);
+    const statusPath = path.join(__dirname, 'status.json');
+    fs.writeFileSync(statusPath, JSON.stringify({ state: 'disconnected', reason: reason, timestamp: Date.now() }));
 });
 
 // Matar procesos Chrome huerfanos que aun tengan el lock del userDataDir
 const SESSION_DIR = path.join(__dirname, '.wwebjs_auth', 'session-birthday-wabot-session');
-try { require('child_process').execSync(`pkill -f "${SESSION_DIR}" 2>/dev/null`); } catch {}
-try { require('child_process').execSync(`pkill -f "chrome.*birthday-wabot" 2>/dev/null`); } catch {}
+if (process.platform === 'win32') {
+    try { require('child_process').execSync('taskkill /F /IM chrome.exe /FI "WINDOWTITLE eq birthday-wabot*" 2>nul', { stdio: 'ignore' }); } catch {}
+} else {
+    try { require('child_process').execSync(`pkill -f "${SESSION_DIR}" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
+    try { require('child_process').execSync(`pkill -f "chrome.*birthday-wabot" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
+}
 
 console.log('Llamando a client.initialize()...');
 client.initialize();

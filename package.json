@@ -11,12 +11,14 @@
   "keywords": [],
   "license": "ISC",
   "devDependencies": {
+    "@prisma/config": "^7.8.0",
     "prisma": "^7.8.0"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "dotenv": "^17.4.2",
+    "node-windows": "^1.0.0-beta.8",
     "pg": "^8.21.0"
   }
 }
