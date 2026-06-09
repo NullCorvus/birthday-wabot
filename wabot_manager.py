@@ -111,6 +111,18 @@ class WabotManagerApp(ctk.CTk):
         btn_uninstall = ctk.CTkButton(actions_frame, text="🗑️ Desinstalar Bot", fg_color=COLOR_RED, hover_color="#7f1d1d", height=45, font=ctk.CTkFont(size=14, weight="bold"), command=self.uninstall_bot_thread)
         btn_uninstall.grid(row=0, column=1, sticky="ew", padx=(5, 0))
         
+        # Push options
+        push_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
+        push_frame.pack(fill="x", pady=(0, 8))
+        self.push_var = ctk.BooleanVar(value=True)
+        self.push_check = ctk.CTkCheckBox(
+            push_frame, text="Crear tablas en BD (prisma db push)", 
+            variable=self.push_var, onvalue=True, offvalue=False,
+            font=ctk.CTkFont(size=12), fg_color=COLOR_PURPLE, hover_color=COLOR_PURPLE_HOVER,
+            border_width=2
+        )
+        self.push_check.pack(side="left")
+        
         # Install Tasks Card (below buttons)
         card_tasks = ctk.CTkFrame(left_panel, fg_color=COLOR_CARD_BG, corner_radius=10)
         card_tasks.pack(fill="both", expand=True)
@@ -334,14 +346,18 @@ class WabotManagerApp(ctk.CTk):
             return
         self.update_task_ui(2, 'done')
         
-        # 3. Prisma DB Push (usar DIRECT_URL temporalmente como DATABASE_URL)
-        self.update_task_ui(3, 'running')
-        env = os.environ.copy()
-        env['DATABASE_URL'] = self.direct_url_var.get()
-        if self.run_command("npx prisma db push --accept-data-loss", cwd=INSTALL_DIR, env=env) != 0:
-            self.update_task_ui(3, 'error')
-            return
-        self.update_task_ui(3, 'done')
+        # 3. Prisma DB Push (opcional)
+        if self.push_var.get():
+            self.update_task_ui(3, 'running')
+            env = os.environ.copy()
+            env['DATABASE_URL'] = self.direct_url_var.get()
+            if self.run_command("npx prisma db push --accept-data-loss", cwd=INSTALL_DIR, env=env) != 0:
+                self.update_task_ui(3, 'error')
+                return
+            self.update_task_ui(3, 'done')
+        else:
+            self.update_task_ui(3, 'done')
+            self.task_ui_elements[3]["status"].configure(text="Saltado")
         
         # 4. Servicio Windows
         self.update_task_ui(4, 'running')
