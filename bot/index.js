@@ -54,7 +54,7 @@ client.on('loading_screen', (percent, message) => {
     console.log(`Cargando WhatsApp Web: ${percent}% - ${message}`);
 });
 
-const qrcodeImage = require('qrcode');
+const https = require('https');
 
 client.on('qr', (qr) => {
     console.log('\n==================================================================');
@@ -64,8 +64,16 @@ client.on('qr', (qr) => {
     
     // Guardar imagen y actualizar estado para la interfaz gráfica
     const qrPath = path.join(__dirname, 'qr.png');
-    qrcodeImage.toFile(qrPath, qr, { width: 300 }, (err) => {
-        if (!err) console.log('✅ QR guardado como imagen para la GUI.');
+    const url = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr);
+    https.get(url, (res) => {
+        const file = fs.createWriteStream(qrPath);
+        res.pipe(file);
+        file.on('finish', () => {
+            file.close();
+            console.log('✅ QR guardado como imagen para la GUI.');
+        });
+    }).on('error', (err) => {
+        console.error('Error al descargar el QR:', err.message);
     });
     
     const statusPath = path.join(__dirname, 'status.json');

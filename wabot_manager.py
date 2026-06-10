@@ -10,6 +10,27 @@ from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
 from PIL import Image
 
+# ---------------------------------------------------------------------------
+# Helpers de ruta — funcionan en modo onefile Y modo carpeta
+# ---------------------------------------------------------------------------
+APP_CONFIG_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'BirthdayWabot')
+
+def get_exe_dir():
+    """Directorio de configuracion del usuario (%APPDATA%\\BirthdayWabot).
+    Es el lugar estandar de Windows para guardar configs de aplicaciones."""
+    os.makedirs(APP_CONFIG_DIR, exist_ok=True)
+    return APP_CONFIG_DIR
+
+def get_bundle_dir():
+    """Directorio con los archivos del bot empaquetados.
+    En modo onefile usa sys._MEIPASS (carpeta temporal de extraccion)."""
+    if getattr(sys, 'frozen', False):
+        if hasattr(sys, '_MEIPASS'):
+            return sys._MEIPASS          # onefile
+        return os.path.dirname(sys.executable)  # modo carpeta
+    return os.path.abspath(os.path.dirname(__file__))
+
+
 def is_admin():
     import ctypes
     try:
@@ -130,6 +151,7 @@ class WabotManagerApp(ctk.CTk):
         ctk.CTkLabel(card_tasks, text="PROGRESO DE INSTALACIÓN", font=ctk.CTkFont(size=12, weight="bold"), text_color=COLOR_PURPLE).pack(anchor="w", padx=15, pady=(15, 10))
         
         self.tasks_data = [
+            {"title": "Verificando Node.js...", "desc": "Comprueba e instala Node.js si no está disponible."},
             {"title": "Copiando Archivos...", "desc": "Copia los archivos del bot a su ubicación."},
             {"title": "Instalando Librerías (NPM)...", "desc": "Ejecuta npm install para instalar dependencias."},
             {"title": "Generando Cliente Prisma...", "desc": "Prepara la conexión a la base de datos."},
@@ -210,14 +232,7 @@ class WabotManagerApp(ctk.CTk):
         self.log_text.pack(fill='both', expand=True, padx=10, pady=10)
         
     def load_env(self):
-        if getattr(sys, 'frozen', False):
-            src_dir = os.path.dirname(sys.executable)
-            if os.path.basename(src_dir).lower() == 'dist':
-                src_dir = os.path.dirname(src_dir)
-        else:
-            src_dir = os.path.abspath(os.path.dirname(__file__))
-            
-        env_path = os.path.join(src_dir, '.env')
+        env_path = os.path.join(get_exe_dir(), '.env')
         if os.path.exists(env_path):
             with open(env_path, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -227,14 +242,7 @@ class WabotManagerApp(ctk.CTk):
                         self.direct_url_var.set(line.split('=', 1)[1].strip().strip('"').strip("'"))
                         
     def save_env(self):
-        if getattr(sys, 'frozen', False):
-            src_dir = os.path.dirname(sys.executable)
-            if os.path.basename(src_dir).lower() == 'dist':
-                src_dir = os.path.dirname(src_dir)
-        else:
-            src_dir = os.path.abspath(os.path.dirname(__file__))
-            
-        env_path = os.path.join(src_dir, '.env')
+        env_path = os.path.join(get_exe_dir(), '.env')
         with open(env_path, 'w', encoding='utf-8') as f:
             f.write(f'DATABASE_URL="{self.db_url_var.get()}"\n')
             f.write(f'DIRECT_URL="{self.direct_url_var.get()}"\n')
@@ -280,37 +288,74 @@ class WabotManagerApp(ctk.CTk):
                 self.log_text.see("end")
         return process.returncode
 
+    def install_nodejs(self):
+        """Intenta instalar Node.js via winget. Retorna True si tiene exito."""
+        self.log("[Node.js]: Intentando instalar automaticamente via winget...")
+        process = subprocess.Popen(
+            'winget install OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements',
+            shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, text=True, errors='replace'
+        )
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                self.log_text.insert("end", f"[Node.js]: {line}")
+                self.log_text.see("end")
+        if process.returncode == 0:
+            self.log("[Node.js]: Instalado. Actualizando PATH...")
+            # Agregar la ruta tipica de Node al PATH del proceso actual
+            for base in [os.environ.get('ProgramFiles','C:\\Program Files'),
+                         os.environ.get('ProgramFiles(x86)','C:\\Program Files (x86)')]:
+                node_path = os.path.join(base, 'nodejs')
+                if os.path.exists(node_path):
+                    os.environ['PATH'] = node_path + os.pathsep + os.environ.get('PATH', '')
+                    break
+            return True
+        self.log("[Node.js]: winget fallo. Descarga Node.js LTS desde: https://nodejs.org/")
+        return False
+
     def install_bot_thread(self):
         if not is_admin():
             messagebox.showerror("Error", "Debes ejecutar este programa como Administrador para instalar el bot.")
             return
-            
         if not self.db_url_var.get() or not self.direct_url_var.get():
             messagebox.showerror("Error", "Debes configurar DATABASE_URL y DIRECT_URL primero.")
             return
-            
         threading.Thread(target=self.install_bot, daemon=True).start()
 
     def install_bot(self):
         for i in range(len(self.task_ui_elements)):
             self.update_task_ui(i, 'pending')
-            
-        self.log("=== INICIANDO INSTALACIÓN ===")
-        
-        # Guardar ENV silenciosamente
-        if getattr(sys, 'frozen', False):
-            src_dir = os.path.dirname(sys.executable)
-            if os.path.basename(src_dir).lower() == 'dist':
-                src_dir = os.path.dirname(src_dir)
-        else:
-            src_dir = os.path.abspath(os.path.dirname(__file__))
-        env_path = os.path.join(src_dir, '.env')
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.write(f'DATABASE_URL="{self.db_url_var.get()}"\n')
-            f.write(f'DIRECT_URL="{self.direct_url_var.get()}"\n')
 
-        # 0. Copiando Archivos
+        self.log("=== INICIANDO INSTALACION ===")
+        os.environ["PUPPETEER_SKIP_DOWNLOAD"] = "true"
+
+        # 0. Verificar / Instalar Node.js
         self.update_task_ui(0, 'running')
+        node_ok = False
+        try:
+            r = subprocess.run('node --version', shell=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if r.returncode == 0:
+                self.log(f"[Node.js]: Detectado {r.stdout.strip()}")
+                node_ok = True
+        except Exception:
+            pass
+        if not node_ok:
+            node_ok = self.install_nodejs()
+        if not node_ok:
+            self.update_task_ui(0, 'error')
+            messagebox.showerror("Error",
+                "Node.js no esta instalado y no se pudo instalar automaticamente.\n"
+                "Descargalo desde https://nodejs.org/ e intenta de nuevo.")
+            return
+        self.update_task_ui(0, 'done')
+
+        # 1. Copiar Archivos
+        self.update_task_ui(1, 'running')
+        src_dir = get_bundle_dir()
         if os.path.exists(INSTALL_DIR):
             subprocess.run('sc stop birthdaywabot.exe', shell=True, stdout=subprocess.DEVNULL)
             time.sleep(3)
@@ -318,60 +363,124 @@ class WabotManagerApp(ctk.CTk):
             time.sleep(1)
         try:
             os.makedirs(INSTALL_DIR, exist_ok=True)
-            shutil.copytree(src_dir, INSTALL_DIR, dirs_exist_ok=True, ignore=shutil.ignore_patterns('node_modules', '.git', '*.log', '.env'))
-            if os.path.exists(os.path.join(src_dir, '.env')):
-                shutil.copy2(os.path.join(src_dir, '.env'), os.path.join(INSTALL_DIR, '.env'))
-            self.update_task_ui(0, 'done')
+            shutil.copytree(src_dir, INSTALL_DIR, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns('node_modules', '.git', '*.log', '.env',
+                                                          '__pycache__', 'daemon', '*.spec', 'build', 'dist'))
+            # Escribir .env con los valores actuales
+            env_content = f'DATABASE_URL="{self.db_url_var.get()}"\nDIRECT_URL="{self.direct_url_var.get()}"\n'
+            with open(os.path.join(INSTALL_DIR, '.env'), 'w', encoding='utf-8') as f:
+                f.write(env_content)
+            # Guardar tambien junto al .exe para que persista entre reinstalaciones
+            with open(os.path.join(get_exe_dir(), '.env'), 'w', encoding='utf-8') as f:
+                f.write(env_content)
+            self.update_task_ui(1, 'done')
         except Exception as e:
             self.log(f"Error copiando: {e}")
-            self.update_task_ui(0, 'error')
-            return
-        
-        bot_dir = os.path.join(INSTALL_DIR, "bot")
-        with open(os.path.join(bot_dir, "install-service.js"), "w", encoding="utf-8") as f:
-            f.write("const Service = require('node-windows').Service;\nconst path = require('path');\nconst svc = new Service({ name: 'BirthdayWabot', description: 'Bot automatizado de WhatsApp', script: path.join(__dirname, 'index.js'), env: [{ name: 'NODE_ENV', value: 'production' }] });\nsvc.on('install', () => { svc.start(); console.log('Servicio iniciado!'); });\nsvc.install();")
-        
-        # 1. NPM Install Raíz
-        self.update_task_ui(1, 'running')
-        if self.run_command("npm install", cwd=INSTALL_DIR) != 0:
             self.update_task_ui(1, 'error')
             return
-        self.update_task_ui(1, 'done')
-        
-        # 2. Prisma Generate
+
+        bot_dir = os.path.join(INSTALL_DIR, "bot")
+        install_js_code = """const Service = require('node-windows').Service;
+const path = require('path');
+const svc = new Service({
+    name: 'BirthdayWabot',
+    description: 'Bot automatizado de WhatsApp',
+    script: path.join(__dirname, 'index.js'),
+    env: [{ name: 'NODE_ENV', value: 'production' }]
+});
+
+svc.on('install', () => {
+    console.log('Servicio instalado exitosamente en Windows!');
+    svc.start();
+    console.log('Servicio iniciado!');
+});
+
+svc.on('alreadyinstalled', () => {
+    console.log('El servicio ya estaba instalado.');
+    svc.start();
+});
+
+svc.on('invalidinstallation', () => {
+    console.log('Instalacion invalida detectada.');
+    process.exit(1);
+});
+
+svc.on('error', (err) => {
+    console.error('Error fatal instalando el servicio:', err);
+    process.exit(1);
+});
+
+console.log('Solicitando a Windows la instalacion del servicio...');
+svc.install();
+"""
+        with open(os.path.join(bot_dir, "install-service.js"), "w", encoding="utf-8") as f:
+            f.write(install_js_code)
+
+        # 2. NPM Install Raiz
         self.update_task_ui(2, 'running')
-        self.run_command("npm install @prisma/config --save-dev", cwd=INSTALL_DIR)
-        if self.run_command("npx prisma generate", cwd=INSTALL_DIR) != 0:
+        if self.run_command("npm install", cwd=INSTALL_DIR) != 0:
             self.update_task_ui(2, 'error')
             return
         self.update_task_ui(2, 'done')
-        
-        # 3. Prisma DB Push (opcional)
+
+        # 3. Prisma Generate
+        self.update_task_ui(3, 'running')
+        self.run_command("npm install @prisma/config --save-dev", cwd=INSTALL_DIR)
+        if self.run_command("npx prisma generate", cwd=INSTALL_DIR) != 0:
+            self.update_task_ui(3, 'error')
+            return
+        self.update_task_ui(3, 'done')
+
+        # 4. Prisma DB Push (opcional)
         if self.push_var.get():
-            self.update_task_ui(3, 'running')
-            env = os.environ.copy()
-            env['DATABASE_URL'] = self.direct_url_var.get()
-            if self.run_command("npx prisma db push --accept-data-loss", cwd=INSTALL_DIR, env=env) != 0:
-                self.update_task_ui(3, 'error')
-                return
-            self.update_task_ui(3, 'done')
+            # 3. Prisma DB Push - usar --url directamente con DIRECT_URL para evitar que dotenv lo sobreescriba
+            self.update_task_ui(4, 'running')
+            direct_url = self.direct_url_var.get()
+            # Pasamos el DIRECT_URL como argumento --url para que Prisma lo use directamente
+            # ignorando cualquier cosa que dotenv.config() intente cargar
+            push_cmd = f'npx prisma db push --accept-data-loss --url="{direct_url}"'
+            push_result = self.run_command(push_cmd, cwd=INSTALL_DIR)
+            if push_result != 0:
+                self.log("⚠️ El push de la base de datos falló. Las tablas pueden ya existir o hay un problema de conexión.")
+                self.log("💡 Puedes continuar si las tablas ya existen. El bot puede funcionar sin este paso.")
+                # Preguntar al usuario si desea continuar de todos modos
+                from tkinter import messagebox as mb
+                continuar = mb.askyesno(
+                    "Aviso - DB Push",
+                    "El paso de configuración de la base de datos falló.\n\n"
+                    "¿Deseas continuar de todos modos?\n\n"
+                    "Selecciona Sí si las tablas ya existen en Supabase.\n"
+                    "Selecciona No para abortar la instalación.",
+                    parent=self
+                )
+                if not continuar:
+                    self.update_task_ui(4, 'error')
+                    return
+                self.update_task_ui(4, 'done')  # Marcar como hecho aunque falló (usuario eligió continuar)
+            else:
+                self.update_task_ui(4, 'done')
         else:
-            self.update_task_ui(3, 'done')
-            self.task_ui_elements[3]["status"].configure(text="Saltado")
-        
-        # 4. Servicio Windows
-        self.update_task_ui(4, 'running')
+            self.update_task_ui(4, 'done')
+            self.task_ui_elements[4]["status"].configure(text="Saltado")
+
+        # 5. Servicio Windows
+        self.update_task_ui(5, 'running')
+        daemon_dir = os.path.join(bot_dir, "daemon")
+        if os.path.exists(daemon_dir):
+            self.log("[Instalador]: Detectada basura de instalaciones previas. Limpiando...")
+            shutil.rmtree(daemon_dir, ignore_errors=True)
+            self.log("[Instalador]: Basura eliminada.")
         if self.run_command("npm install", cwd=bot_dir) != 0:
-            self.update_task_ui(4, 'error')
+            self.update_task_ui(5, 'error')
             return
         self.run_command("npm install node-windows", cwd=bot_dir)
         if self.run_command("node install-service.js", cwd=bot_dir) != 0:
-            self.update_task_ui(4, 'error')
+            self.update_task_ui(5, 'error')
             return
-        self.update_task_ui(4, 'done')
-        
-        self.log("=== INSTALACIÓN COMPLETADA EXITOSAMENTE ===")
-        messagebox.showinfo("Éxito", "El Bot se ha instalado correctamente. Ve a la pestaña 'Conexión WhatsApp' para escanear el QR.")
+        self.update_task_ui(5, 'done')
+
+        self.log("=== INSTALACION COMPLETADA EXITOSAMENTE ===")
+        messagebox.showinfo("Exito", "El Bot se ha instalado correctamente. Ve a la pestana 'Conexion WhatsApp' para escanear el QR.")
 
     def uninstall_bot_thread(self):
         if not is_admin():
@@ -388,6 +497,17 @@ class WabotManagerApp(ctk.CTk):
             self.run_command("node uninstall-service.js", cwd=bot_dir)
         time.sleep(3)
         self.run_command("sc delete birthdaywabot.exe")
+        
+        # Eliminar carpeta daemon explicitamente
+        daemon_dir = os.path.join(bot_dir, 'daemon')
+        if os.path.exists(daemon_dir):
+            self.log("[Limpieza]: Eliminando archivos basura de instalaciones previas (carpeta daemon)...")
+            try:
+                shutil.rmtree(daemon_dir, ignore_errors=True)
+                self.log("[Limpieza]: Carpeta daemon eliminada exitosamente.")
+            except Exception as e:
+                self.log(f"[Limpieza Error]: No se pudo eliminar la carpeta daemon: {e}")
+        
         self.log("=== DESINSTALACIÓN COMPLETADA ===")
         messagebox.showinfo("Éxito", "El Bot ha sido desinstalado.")
 
