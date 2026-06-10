@@ -25,6 +25,23 @@ Thumbs.db
 .wwebjs_auth/
 .wwebjs_cache/
 
+# PyInstaller build artifacts
+build/
+dist/
+
+# Old PyInstaller specs (obsolete)
+WabotManager.spec
+WabotManagerV2.spec
+WabotManagerV3.spec
+WabotDashboard.spec
+
+# Legacy Python bot code
+legacy/
+
+# Temp files
+query
+test_push.py
+
 # Docker
 pgdata/
 
