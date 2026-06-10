@@ -147,5 +147,21 @@ if (process.platform === 'win32') {
     try { require('child_process').execSync(`pkill -f "chrome.*birthday-wabot" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
 }
 
+// Watcher para trigger manual desde la GUI
+setInterval(async () => {
+    const triggerPath = path.join(__dirname, '.trigger_send');
+    if (fs.existsSync(triggerPath)) {
+        console.log('\n[MANUAL TRIGGER] Detectada solicitud de envío manual desde la GUI.');
+        try {
+            fs.unlinkSync(triggerPath);
+            const { processBirthdays } = require('./scheduler');
+            // Pasamos "true" para forzar el reenvío incluso si ya se envió hoy
+            await processBirthdays(client, true);
+        } catch (err) {
+            console.error('Error en trigger manual:', err);
+        }
+    }
+}, 2000);
+
 console.log('Llamando a client.initialize()...');
 client.initialize();

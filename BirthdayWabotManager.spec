@@ -5,7 +5,7 @@ a = Analysis(
     ['wabot_manager.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('wabot_icon_blue.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['wabot_icon.ico'],
+    icon=['wabot_icon_blue.ico'],
 )

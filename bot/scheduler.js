@@ -6,7 +6,7 @@ const { logOfflineEvent } = require('./utils/logger');
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-async function processBirthdays(client) {
+async function processBirthdays(client, forceSend = false) {
   try {
     console.log('[SCHEDULER] Iniciando revisión de cumpleaños...');
     
@@ -20,17 +20,21 @@ async function processBirthdays(client) {
     }
     const templateText = templateRow.texto;
 
+    // Obtener fecha actual en la zona horaria local (Windows)
+    const today = new Date();
+    const todayMonth = today.getMonth() + 1;
+    const todayDay = today.getDate();
+
     // Obtener contactos activos cuyo cumpleaños es hoy
-    // Usamos queryRaw porque prisma no tiene un filtro simple por "día y mes" ignorando el año
     const contacts = await prisma.$queryRaw`
       SELECT * FROM "contactos" 
       WHERE "activo" = true 
-        AND EXTRACT(MONTH FROM "fecha_nacimiento") = EXTRACT(MONTH FROM CURRENT_DATE) 
-        AND EXTRACT(DAY FROM "fecha_nacimiento") = EXTRACT(DAY FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM "fecha_nacimiento") = ${todayMonth} 
+        AND EXTRACT(DAY FROM "fecha_nacimiento") = ${todayDay}
     `;
 
     if (contacts.length === 0) {
-      console.log('[SCHEDULER] No hay cumpleaños para hoy.');
+      console.log(`[SCHEDULER] No hay cumpleaños para el día de hoy (${todayDay}/${todayMonth}).`);
       return;
     }
 
