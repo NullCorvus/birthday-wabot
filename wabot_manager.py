@@ -349,6 +349,111 @@ class WabotManagerApp(ctk.CTk):
             return 1
 
     # -----------------------------------------------------------------------
+    # Helpers: detener servicio, instalar dependencias
+    # -----------------------------------------------------------------------
+    def has_winget(self):
+        code = subprocess.run("where winget", shell=True, capture_output=True).returncode
+        return code == 0
+
+    def winget_install(self, package_id):
+        self.log(f"  Intentando winget: {package_id} ...")
+        code = subprocess.run(
+            f"winget install {package_id} --silent --accept-package-agreements --accept-source-agreements",
+            shell=True, capture_output=True
+        ).returncode
+        return code == 0
+
+    def download_file(self, url, dest):
+        import urllib.request
+        self.log(f"  Descargando: {url}")
+        try:
+            urllib.request.urlretrieve(url, dest)
+            return True
+        except Exception as e:
+            self.log(f"  Error descarga: {e}")
+            return False
+
+    def install_node(self):
+        self.log("--- Verificando Node.js ---")
+        code = subprocess.run("node -v", shell=True, capture_output=True).returncode
+        if code == 0:
+            self.log("  Node.js ya instalado.  [OK]")
+            return True
+        self.log("  Node.js NO instalado. Instalando...")
+        if self.has_winget() and self.winget_install("OpenJS.NodeJS.LTS"):
+            code = subprocess.run("node -v", shell=True, capture_output=True).returncode
+            if code == 0:
+                self.log("  Node.js instalado con winget.  [OK]")
+                return True
+        self.log("  Descargando Node.js LTS...")
+        try:
+            import urllib.request, json, tempfile
+            with urllib.request.urlopen("https://nodejs.org/dist/index.json") as r:
+                data = json.loads(r.read().decode())
+                lts = next(item for item in data if item["lts"] is not False)["version"]
+            url = f"https://nodejs.org/dist/{lts}/node-{lts}-x64.msi"
+            dest = os.path.join(tempfile.gettempdir(), "node_installer.msi")
+            if self.download_file(url, dest):
+                self.log("  Instalando Node.js (silencioso)...")
+                subprocess.run(f"msiexec.exe /i \"{dest}\" /quiet /norestart", shell=True)
+                time.sleep(3)
+                os.environ["PATH"] += os.pathsep + r"C:\Program Files\nodejs"
+                for _ in range(6):
+                    code = subprocess.run("node -v", shell=True, capture_output=True).returncode
+                    if code == 0:
+                        break
+                    time.sleep(3)
+                try:
+                    os.remove(dest)
+                except:
+                    pass
+                if code == 0:
+                    self.log("  Node.js instalado.  [OK]")
+                    return True
+                if os.path.exists(r"C:\Program Files\nodejs\node.exe"):
+                    self.log("  node.exe encontrado en disco.  [OK]")
+                    return True
+        except Exception as e:
+            self.log(f"  Error instalando Node.js: {e}")
+            return False
+        self.log("  No se pudo instalar Node.js.  [ERROR]")
+        return False
+
+    def install_chrome(self):
+        self.log("--- Verificando Google Chrome ---")
+        paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        ]
+        if any(os.path.exists(p) for p in paths):
+            self.log("  Chrome ya instalado.  [OK]")
+            return True
+        self.log("  Chrome NO instalado. Instalando...")
+        if self.has_winget() and self.winget_install("Google.Chrome"):
+            if any(os.path.exists(p) for p in paths):
+                self.log("  Chrome instalado con winget.  [OK]")
+                return True
+        self.log("  Descargando Chrome...")
+        url = "https://dl.google.com/chrome/install/latest/chrome_installer.exe"
+        dest = os.path.join(tempfile.gettempdir(), "chrome_installer.exe")
+        if self.download_file(url, dest):
+            self.log("  Instalando Chrome (silencioso)...")
+            subprocess.run(f"\"{dest}\" /silent /install", shell=True)
+            os.remove(dest)
+            self.log("  Chrome instalado.  [OK]")
+            return True
+        self.log("  No se pudo instalar Chrome.  [AVISO]")
+        return False
+
+    def stop_bot_service(self):
+        self.log("  Deteniendo servicio existente...")
+        subprocess.run("net stop BirthdayWabot /y", shell=True, capture_output=True)
+        time.sleep(2)
+        subprocess.run("taskkill /F /IM node.exe /FI \"WINDOWTITLE eq birthday*\" 2>nul", shell=True, capture_output=True)
+        subprocess.run("taskkill /F /IM node.exe /FI \"WINDOWTITLE eq Birthday*\" 2>nul", shell=True, capture_output=True)
+        time.sleep(1)
+
+    # -----------------------------------------------------------------------
     # Lógica de Trigger Manual
     # -----------------------------------------------------------------------
     def force_manual_trigger(self):
@@ -384,6 +489,14 @@ class WabotManagerApp(ctk.CTk):
         threading.Thread(target=self.install_bot, daemon=True).start()
 
     def install_bot(self):
+        # 0. Preparacion: detener servicio e instalar dependencias
+        self.log("--- Preparando entorno ---")
+        self.stop_bot_service()
+        if not self.install_node():
+            self.update_task_ui(1, 'error')
+            return
+        self.install_chrome()
+        
         # 1. Copiar Archivos
         self.update_task_ui(1, 'running')
         if os.path.exists(INSTALL_DIR):
@@ -487,10 +600,12 @@ svc.install();
         if os.path.exists(daemon_dir):
             shutil.rmtree(daemon_dir, ignore_errors=True)
             
-        if self.run_command("npm install", cwd=bot_dir) != 0:
+        bot_env = os.environ.copy()
+        bot_env["PUPPETEER_SKIP_DOWNLOAD"] = "true"
+        if self.run_command("npm install", cwd=bot_dir, env=bot_env) != 0:
             self.update_task_ui(5, 'error')
             return
-        self.run_command("npm install node-windows", cwd=bot_dir)
+        self.run_command("npm install node-windows", cwd=bot_dir, env=bot_env)
         if self.run_command("node install-service.js", cwd=bot_dir) != 0:
             self.update_task_ui(5, 'error')
             return
@@ -510,6 +625,9 @@ svc.install();
     def uninstall_bot(self):
         self.log("=== INICIANDO DESINSTALACION ===")
         bot_dir = os.path.join(INSTALL_DIR, "bot")
+        
+        # Detener servicio y procesos antes de desinstalar
+        self.stop_bot_service()
         
         uninstall_js_code = """
 const Service = require('node-windows').Service;
