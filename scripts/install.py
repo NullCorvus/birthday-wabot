@@ -11,8 +11,6 @@ import tempfile
 import time
 from urllib.error import URLError
 
-os.environ["PUPPETEER_SKIP_DOWNLOAD"] = "true"
-
 # ==========================================
 # CONFIGURACION
 # ==========================================
@@ -85,7 +83,7 @@ def download_file(url, dest):
 # ==========================================
 
 def step_node():
-    logging.info("--- [1/10] Verificando Node.js ---")
+    logging.info("--- [1/7] Verificando Node.js ---")
     code, out = run_cmd("node -v", hide_output=True)
     if code == 0:
         logging.info(f"Node.js ya está instalado: {out.strip()}")
@@ -113,7 +111,7 @@ def step_node():
     return True
 
 def step_git():
-    logging.info("--- [2/10] Verificando Git ---")
+    logging.info("--- [2/7] Verificando Git ---")
     code, out = run_cmd("git --version", hide_output=True)
     if code == 0:
         logging.info(f"Git ya está instalado: {out.strip()}")
@@ -139,31 +137,8 @@ def step_git():
         return False
     return True
 
-def step_chrome():
-    logging.info("--- [3/10] Verificando Google Chrome ---")
-    paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-    ]
-    if any(os.path.exists(p) for p in paths):
-        logging.info("Google Chrome ya está instalado.")
-        return True
-
-    logging.info("Chrome NO está instalado. (Requerido por WhatsApp Web)")
-    if has_winget() and winget_install("Google.Chrome"):
-        return True
-
-    url = "https://dl.google.com/chrome/install/latest/chrome_installer.exe"
-    dest = os.path.join(tempfile.gettempdir(), "chrome_installer.exe")
-    if download_file(url, dest):
-        logging.info("Instalando Chrome (silencioso)...")
-        run_cmd(f"\"{dest}\" /silent /install")
-        os.remove(dest)
-    
-    return True
-
 def step_repo():
-    logging.info("--- [4/10] Preparando Repositorio ---")
+    logging.info("--- [3/7] Preparando Repositorio ---")
     os.makedirs(INSTALL_DIR, exist_ok=True)
     
     git_dir = os.path.join(INSTALL_DIR, ".git")
@@ -190,7 +165,7 @@ def step_repo():
     return True
 
 def step_npm():
-    logging.info("--- [5/10] Instalando Dependencias NPM ---")
+    logging.info("--- [4/7] Instalando Dependencias NPM ---")
     
     # Reload path to pick up node/npm if newly installed
     os.environ["PATH"] += os.pathsep + r"C:\Program Files\nodejs"
@@ -212,7 +187,7 @@ def step_npm():
     return True
 
 def step_env():
-    logging.info("--- [6/10] Configurando Base de Datos ---")
+    logging.info("--- [5/7] Configurando Base de Datos ---")
     env_file = os.path.join(INSTALL_DIR, ".env")
     
     if os.path.exists(env_file):
@@ -242,7 +217,7 @@ def step_env():
     return True
 
 def step_prisma():
-    logging.info("--- [7/10] Generando Cliente Prisma ---")
+    logging.info("--- [6/7] Generando Cliente Prisma ---")
     run_cmd("npx prisma generate", cwd=INSTALL_DIR)
     
     ans = input("\n¿Ejecutar 'prisma db push' para crear tablas ahora? (s/n): ")
@@ -269,7 +244,7 @@ def step_prisma():
     return True
 
 def step_service():
-    logging.info("--- [8/8] Instalando Servicio Windows con node-windows ---")
+    logging.info("--- [7/7] Instalando Servicio Windows con node-windows ---")
     bot_dir = os.path.join(INSTALL_DIR, "bot")
     
     logging.info("Instalando node-windows...")
@@ -339,7 +314,6 @@ def main():
     steps = [
         step_node,
         step_git,
-        step_chrome,
         step_repo,
         step_npm,
         step_env,

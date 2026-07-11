@@ -1,68 +1,31 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+const pino = require('pino');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 console.log('Iniciando el bot de WhatsApp...');
 
-// Buscar ruta del navegador instalado en el sistema para evitar descargas corruptas de Puppeteer
-const getChromePath = () => {
-    const paths = [
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-    ];
-    for (const p of paths) {
-        if (fs.existsSync(p)) {
-            console.log(`Usando navegador del sistema encontrado en: ${p}`);
-            return p;
-        }
+const AUTH_DIR = path.join(__dirname, 'auth_info_baileys');
+
+let sock;
+let birthdaysProcessed = false;
+
+async function runBirthdayCheck(sock) {
+    if (birthdaysProcessed) return;
+    birthdaysProcessed = true;
+    console.log('\n📋 Ejecutando revisión de cumpleaños...');
+    try {
+        const { processBirthdays } = require('./scheduler');
+        await processBirthdays(sock);
+    } catch (err) {
+        console.error('Error en revisión de cumpleaños:', err);
     }
-    return undefined;
-};
+}
 
-// Configuración compatible con Windows y Linux (incluyendo entornos sin sandbox)
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: "birthday-wabot-session"
-    }),
-    webVersion: '2.2412.54',
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-    },
-    puppeteer: {
-        headless: true,
-        executablePath: getChromePath(),
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    }
-});
-
-client.on('loading_screen', (percent, message) => {
-    console.log(`Cargando WhatsApp Web: ${percent}% - ${message}`);
-});
-
-const https = require('https');
-
-client.on('qr', (qr) => {
-    console.log('\n==================================================================');
-    console.log('Escanea este código QR con tu aplicación de WhatsApp (Dispositivos Vinculados):');
-    console.log('==================================================================\n');
-    qrcode.generate(qr, { small: true });
-    
-    // Guardar imagen y actualizar estado para la interfaz gráfica
+function downloadQrImage(qr) {
     const qrPath = path.join(__dirname, 'qr.png');
     const url = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr);
     https.get(url, (res) => {
@@ -75,79 +38,125 @@ client.on('qr', (qr) => {
     }).on('error', (err) => {
         console.error('Error al descargar el QR:', err.message);
     });
-    
-    const statusPath = path.join(__dirname, 'status.json');
-    fs.writeFileSync(statusPath, JSON.stringify({ state: 'qr_ready', timestamp: Date.now() }));
-});
-
-client.on('auth_failure', (msg) => {
-    console.error('Fallo en la autenticación:', msg);
-});
-
-let birthdaysProcessed = false;
-
-async function runBirthdayCheck(client) {
-    if (birthdaysProcessed) return;
-    birthdaysProcessed = true;
-    console.log('\n📋 Ejecutando revisión de cumpleaños...');
-    try {
-        const { processBirthdays } = require('./scheduler');
-        await processBirthdays(client);
-    } catch (err) {
-        console.error('Error en revisión de cumpleaños:', err);
-    }
 }
 
-client.on('ready', async () => {
-    console.log('\n=========================================');
-    console.log('¡El cliente de WhatsApp está listo!');
-    console.log('=========================================\n');
-    
-    // Eliminar QR viejo y actualizar estado
-    const qrPath = path.join(__dirname, 'qr.png');
-    if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+function setStatus(state, extra = {}) {
     const statusPath = path.join(__dirname, 'status.json');
-    fs.writeFileSync(statusPath, JSON.stringify({ state: 'running', timestamp: Date.now() }));
-    
-    const { startScheduler, processBirthdays } = require('./scheduler');
-    startScheduler(client);
-    await runBirthdayCheck(client);
-});
+    fs.writeFileSync(statusPath, JSON.stringify({ state, ...extra, timestamp: Date.now() }));
+}
 
-// Fallback: si ready no se dispara, procesar igual cuando esté autenticado
-client.on('authenticated', () => {
-    console.log('¡Autenticado con éxito en WhatsApp!');
-    
-    // Eliminar QR viejo y actualizar estado
+function cleanQr() {
     const qrPath = path.join(__dirname, 'qr.png');
     if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
-    const statusPath = path.join(__dirname, 'status.json');
-    fs.writeFileSync(statusPath, JSON.stringify({ state: 'running', timestamp: Date.now() }));
-    
-    setTimeout(() => {
-        if (!birthdaysProcessed) {
-            console.log('⚠️  ready no se disparó, ejecutando revisión igual...');
-            runBirthdayCheck(client);
+}
+
+function cleanAuth() {
+    if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+}
+
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 5;
+
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+
+    sock = makeWASocket({
+        auth: state,
+        browser: ['Birthday Wabot', 'Chrome', '1.0.0'],
+        logger: pino({ level: 'silent' }),
+        defaultQueryTimeoutMs: undefined,
+        connectTimeoutMs: 60_000,
+        keepAliveIntervalMs: 30_000
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            reconnectAttempts = 0;
+            console.log('\n==================================================================');
+            console.log('Escanea este código QR con tu aplicación de WhatsApp (Dispositivos Vinculados):');
+            console.log('==================================================================\n');
+            qrcode.generate(qr, { small: true });
+            downloadQrImage(qr);
+            setStatus('qr_ready');
         }
-    }, 15000);
-});
 
-client.on('disconnected', (reason) => {
-    console.log('El cliente se desconectó:', reason);
-    const statusPath = path.join(__dirname, 'status.json');
-    fs.writeFileSync(statusPath, JSON.stringify({ state: 'disconnected', reason: reason, timestamp: Date.now() }));
-});
+        if (connection === 'open') {
+            console.log('\n=========================================');
+            console.log('¡El cliente de WhatsApp está listo!');
+            console.log('=========================================\n');
 
-// Matar procesos Chrome huerfanos que aun tengan el lock del userDataDir
-const SESSION_DIR = path.join(__dirname, '.wwebjs_auth', 'session-birthday-wabot-session');
-if (process.platform === 'win32') {
-    try { require('child_process').execSync('taskkill /F /IM chrome.exe /FI "WINDOWTITLE eq birthday-wabot*" 2>nul', { stdio: 'ignore' }); } catch {}
-} else {
-    try { require('child_process').execSync(`pkill -f "${SESSION_DIR}" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
-    try { require('child_process').execSync(`pkill -f "chrome.*birthday-wabot" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
+            cleanQr();
+            setStatus('running');
+            reconnectAttempts = 0;
+
+            const { startScheduler } = require('./scheduler');
+            startScheduler(sock);
+            await runBirthdayCheck(sock);
+        }
+
+        if (connection === 'close') {
+            const raw = lastDisconnect?.error;
+            const statusCode = raw?.output?.statusCode || raw?.statusCode || 'N/A';
+            const message = raw?.message || raw?.toString() || 'Desconocido';
+            const fullError = raw ? JSON.stringify(raw, Object.getOwnPropertyNames(raw), 2) : 'sin detalles';
+
+            console.log('\n--- Desconexión Detectada ---');
+            console.log('Código:', statusCode);
+            console.log('Mensaje:', message);
+            console.log('Detalle completo:', fullError);
+            console.log('-----------------------------\n');
+
+            setStatus('disconnected', { reason: String(statusCode) });
+
+            if (statusCode === DisconnectReason.loggedOut) {
+                console.log('[LOGGED_OUT] Sesión cerrada. Borrando credenciales...');
+                cleanAuth();
+                birthdaysProcessed = false;
+                reconnectAttempts = 0;
+                setTimeout(connectToWhatsApp, 3000);
+                return;
+            }
+
+            if (statusCode === DisconnectReason.restartRequired) {
+                console.log('[RESTART] Reinicio solicitado. Reconectando...');
+                reconnectAttempts = 0;
+                setTimeout(connectToWhatsApp, 3000);
+                return;
+            }
+
+            if (statusCode === DisconnectReason.connectionClosed || statusCode === DisconnectReason.timedOut) {
+                console.log('[NETWORK] Pérdida de conexión. Reconectando...');
+                reconnectAttempts = 0;
+                setTimeout(connectToWhatsApp, 5000);
+                return;
+            }
+
+            reconnectAttempts++;
+            if (reconnectAttempts > MAX_RECONNECT) {
+                console.error(`[FATAL] ${MAX_RECONNECT} intentos fallidos. Limpiando sesión y reintentando...`);
+                cleanAuth();
+                birthdaysProcessed = false;
+                reconnectAttempts = 0;
+                setTimeout(connectToWhatsApp, 5000);
+                return;
+            }
+
+            console.log(`[RETRY ${reconnectAttempts}/${MAX_RECONNECT}] Reconectando en 5s...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            connectToWhatsApp();
+        }
+    });
 }
 
-// Watcher para trigger manual desde la GUI
+connectToWhatsApp().catch(err => {
+    console.error('Error fatal al iniciar el bot:', err);
+    process.exit(1);
+});
+
 setInterval(async () => {
     const triggerPath = path.join(__dirname, '.trigger_send');
     if (fs.existsSync(triggerPath)) {
@@ -155,13 +164,9 @@ setInterval(async () => {
         try {
             fs.unlinkSync(triggerPath);
             const { processBirthdays } = require('./scheduler');
-            // Pasamos "true" para forzar el reenvío incluso si ya se envió hoy
-            await processBirthdays(client, true);
+            await processBirthdays(sock, true);
         } catch (err) {
             console.error('Error en trigger manual:', err);
         }
     }
 }, 2000);
-
-console.log('Llamando a client.initialize()...');
-client.initialize();

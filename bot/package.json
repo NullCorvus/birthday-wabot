@@ -12,10 +12,10 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
     "node-cron": "^4.2.1",
     "pg": "^8.21.0",
-    "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }

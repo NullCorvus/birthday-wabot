@@ -24,6 +24,10 @@ Thumbs.db
 # WhatsApp session
 .wwebjs_auth/
 .wwebjs_cache/
+bot/auth_info_baileys/
+bot/status.json
+bot/qr.png
+bot/.trigger_send
 
 # PyInstaller build artifacts
 build/
