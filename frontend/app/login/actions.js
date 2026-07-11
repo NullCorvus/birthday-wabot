@@ -12,7 +12,7 @@ export async function login(formData) {
     }
 
     if (password === authPassword) {
-        const cookieStore = cookies();
+        const cookieStore = await cookies();
         cookieStore.set('auth_token', 'true', {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
