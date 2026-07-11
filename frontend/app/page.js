@@ -37,6 +37,7 @@ export default async function Dashboard() {
 
   // Calculate next birthday
   let nextBirthday = null;
+  let nextBirthdayIsToday = false;
   let minDiff = Infinity;
   const currentYear = now.getUTCFullYear();
 
@@ -44,8 +45,18 @@ export default async function Dashboard() {
     const bday = new Date(c.fecha_nacimiento);
     let nextBdayThisYear = new Date(currentYear, bday.getUTCMonth(), bday.getUTCDate());
     
-    // Si ya pasó este año, el próximo es el año que viene
-    if (nextBdayThisYear < now && !(bday.getUTCMonth() === todayMonth && bday.getUTCDate() === todayDate)) {
+    const isToday = bday.getUTCMonth() === todayMonth && bday.getUTCDate() === todayDate;
+
+    if (isToday) {
+      if (0 < minDiff) {
+        minDiff = 0;
+        nextBirthday = c;
+        nextBirthdayIsToday = true;
+      }
+      return;
+    }
+
+    if (nextBdayThisYear < now) {
       nextBdayThisYear = new Date(currentYear + 1, bday.getUTCMonth(), bday.getUTCDate());
     }
 
@@ -53,12 +64,15 @@ export default async function Dashboard() {
     if (diff > 0 && diff < minDiff) {
       minDiff = diff;
       nextBirthday = c;
+      nextBirthdayIsToday = false;
     }
   });
 
-  const nextBirthdayFormatted = nextBirthday 
-    ? new Date(nextBirthday.fecha_nacimiento).toLocaleDateString('es-ES', { timeZone: 'UTC', day: 'numeric', month: 'short' })
-    : "-";
+  const nextBirthdayFormatted = nextBirthdayIsToday
+    ? "Hoy"
+    : nextBirthday 
+      ? new Date(nextBirthday.fecha_nacimiento).toLocaleDateString('es-ES', { timeZone: 'UTC', day: 'numeric', month: 'short' })
+      : "-";
 
   const rawLogs = await prisma.log.findMany({
     include: { contacto: true },
