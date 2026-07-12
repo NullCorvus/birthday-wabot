@@ -5,6 +5,7 @@ import threading
 import time
 import shutil
 import json
+import traceback
 import customtkinter as ctk
 from tkinter import messagebox
 from tkinter import Canvas
@@ -331,10 +332,10 @@ class WabotManagerApp(ctk.CTk):
         self.txt_logs.insert(tk.END, msg + "\n")
         self.txt_logs.see(tk.END)
 
-    def run_command(self, cmd, cwd=None, env=None):
+    def run_command(self, cmd, cwd=None, env=None, timeout=300):
         self.log(f"\n[Ejecutando]: {cmd}")
+        process = None
         try:
-            # stdin=subprocess.DEVNULL previene bloqueos de prompts (ej: Prisma)
             process = subprocess.Popen(
                 cmd, cwd=cwd, shell=True, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -342,8 +343,14 @@ class WabotManagerApp(ctk.CTk):
             )
             for line in process.stdout:
                 self.log(line.strip())
-            process.wait()
+            process.wait(timeout=timeout)
             return process.returncode
+        except subprocess.TimeoutExpired:
+            self.log(f"ERROR: El comando excedio el tiempo limite ({timeout}s). Cancelando...")
+            if process:
+                process.kill()
+                process.wait()
+            return 1
         except Exception as e:
             self.log(f"Error ejecutando comando: {e}")
             return 1
@@ -384,8 +391,21 @@ class WabotManagerApp(ctk.CTk):
         threading.Thread(target=self.install_bot, daemon=True).start()
 
     def install_bot(self):
+        try:
+            self._do_install_bot()
+        except Exception as e:
+            self.log(f"\n[ERROR INESPERADO] {e}")
+            self.log(traceback.format_exc())
+            self.after(0, lambda: messagebox.showerror("Error Inesperado", f"Ocurrio un error inesperado:\n\n{e}\n\nRevisa la pestaña 'Consola / Logs' para mas detalles."))
+
+    def _do_install_bot(self):
         # 1. Copiar Archivos
+        self.log("[PASO 1/5] Iniciando: Copiar Archivos")
         self.update_task_ui(1, 'running')
+
+        source_dir = get_bundle_dir()
+        self.log(f"[INFO] Directorio fuente: {source_dir}")
+
         if os.path.exists(INSTALL_DIR):
             self.log("Carpeta de destino ya existe, limpiando...")
             try:
@@ -394,23 +414,36 @@ class WabotManagerApp(ctk.CTk):
                 self.log(f"Error limpiando carpeta: {e}")
                 self.update_task_ui(1, 'error')
                 return
-        
+
+        required_files = [
+            os.path.join(source_dir, "package.json"),
+            os.path.join(source_dir, "prisma", "schema.prisma"),
+            os.path.join(source_dir, "bot", "index.js"),
+        ]
+        missing = [f for f in required_files if not os.path.exists(f)]
+        if missing:
+            self.log("[ERROR] No se encontraron los siguientes archivos fuente:")
+            for f in missing:
+                self.log(f"  - {f}")
+            self.log("[ERROR] Asegurate de que el .exe incluya los archivos bot/, prisma/ y package.json")
+            self.update_task_ui(1, 'error')
+            return
+        self.log("[INFO] Todos los archivos fuente encontrados.")
+
         os.makedirs(INSTALL_DIR, exist_ok=True)
         bot_dir = os.path.join(INSTALL_DIR, "bot")
         os.makedirs(bot_dir, exist_ok=True)
-        
-        source_dir = get_bundle_dir()
-        
+
         shutil.copy2(os.path.join(APP_CONFIG_DIR, ".env") if os.path.exists(os.path.join(APP_CONFIG_DIR, ".env")) else os.path.join(source_dir, ".env"), os.path.join(INSTALL_DIR, ".env"))
-        
+
         for item in ["package.json", "package-lock.json", "prisma.config.ts"]:
             src = os.path.join(source_dir, item)
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(INSTALL_DIR, item))
-                
+
         shutil.copytree(os.path.join(source_dir, "prisma"), os.path.join(INSTALL_DIR, "prisma"))
         shutil.copytree(os.path.join(source_dir, "bot"), bot_dir, dirs_exist_ok=True)
-        
+
         # Generar install-service.js
         install_js_code = """
 const Service = require('node-windows').Service;
@@ -448,56 +481,84 @@ svc.install();
             f.write(install_js_code)
 
         self.update_task_ui(1, 'done')
+        self.log("[PASO 1/5] Completado: Copiar Archivos")
 
-        # 2. NPM Install Raiz
+        # 2. Verificar Node.js y NPM Install Raiz
+        self.log("[PASO 2/5] Iniciando: Instalar Dependencias")
         self.update_task_ui(2, 'running')
+
+        self.log("[INFO] Verificando Node.js...")
+        if self.run_command("node --version") != 0:
+            self.log("[ERROR] Node.js no esta instalado o no esta en el PATH.")
+            self.log("[ERROR] Instala Node.js desde https://nodejs.org y vuelve a intentar.")
+            self.update_task_ui(2, 'error')
+            return
+        self.log("[INFO] Verificando npm...")
+        if self.run_command("npm --version") != 0:
+            self.log("[ERROR] npm no esta instalado o no esta en el PATH.")
+            self.update_task_ui(2, 'error')
+            return
+
+        self.log("[INFO] Instalando dependencias (npm install)...")
         if self.run_command("npm install", cwd=INSTALL_DIR) != 0:
+            self.log("[ERROR] npm install fallo. Revisa tu conexion a internet.")
             self.update_task_ui(2, 'error')
             return
         self.update_task_ui(2, 'done')
+        self.log("[PASO 2/5] Completado: Instalar Dependencias")
 
         # 3. Prisma Generate
+        self.log("[PASO 3/5] Iniciando: Generar Cliente Prisma")
         self.update_task_ui(3, 'running')
         self.run_command("npm install @prisma/config --save-dev", cwd=INSTALL_DIR)
         if self.run_command("npx prisma generate", cwd=INSTALL_DIR) != 0:
+            self.log("[ERROR] prisma generate fallo. Revisa la URL de la base de datos.")
             self.update_task_ui(3, 'error')
             return
         self.update_task_ui(3, 'done')
+        self.log("[PASO 3/5] Completado: Generar Cliente Prisma")
 
         # 4. Prisma DB Push
         if self.push_var.get():
+            self.log("[PASO 4/5] Iniciando: Crear Tablas en BD")
             self.update_task_ui(4, 'running')
             direct_url = self.direct_url_var.get()
             push_cmd = f'npx prisma db push --accept-data-loss --url="{direct_url}"'
             push_result = self.run_command(push_cmd, cwd=INSTALL_DIR)
             if push_result != 0:
-                self.log("⚠️ El push falló. Si las tablas ya existen, puedes continuar.")
-                res = messagebox.askyesno("Aviso", "El push de base de datos falló.\n¿Continuar de todos modos si las tablas ya existen?")
+                self.log("[AVISO] El push fallo. Si las tablas ya existen, puedes continuar.")
+                res = messagebox.askyesno("Aviso", "El push de base de datos fallo.\nContinuar de todos modos si las tablas ya existen?")
                 if not res:
                     self.update_task_ui(4, 'error')
                     return
             self.update_task_ui(4, 'done')
+            self.log("[PASO 4/5] Completado: Crear Tablas en BD")
         else:
             self.update_task_ui(4, 'done')
             self.stepper.step_widgets[3]["sub_label"].configure(text="Saltado")
+            self.log("[PASO 4/5] Saltado: Crear Tablas en BD")
 
         # 5. Servicio Windows
+        self.log("[PASO 5/5] Iniciando: Instalar Servicio Windows")
         self.update_task_ui(5, 'running')
         daemon_dir = os.path.join(bot_dir, "daemon")
         if os.path.exists(daemon_dir):
             shutil.rmtree(daemon_dir, ignore_errors=True)
-            
+
         if self.run_command("npm install", cwd=bot_dir) != 0:
+            self.log("[ERROR] npm install en bot fallo.")
             self.update_task_ui(5, 'error')
             return
         self.run_command("npm install node-windows", cwd=bot_dir)
         if self.run_command("node install-service.js", cwd=bot_dir) != 0:
+            self.log("[ERROR] No se pudo instalar el servicio de Windows.")
             self.update_task_ui(5, 'error')
             return
         self.update_task_ui(5, 'done')
+        self.log("[PASO 5/5] Completado: Instalar Servicio Windows")
 
-        self.log("=== INSTALACION COMPLETADA EXITOSAMENTE ===")
-        messagebox.showinfo("Éxito", "El Bot se ha instalado. Ve a la pestaña 'Conexión WhatsApp' para escanear el QR.")
+        self.log("\n=== INSTALACION COMPLETADA EXITOSAMENTE ===")
+        self.after(0, lambda: messagebox.showinfo("Exito", "El Bot se ha instalado. Ve a la pestana 'Conexion WhatsApp' para escanear el QR."))
 
     def uninstall_bot_thread(self):
         if not is_admin():
