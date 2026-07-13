@@ -9,7 +9,7 @@ Bot automatizado de mensajes de cumpleaños por WhatsApp, con panel de administr
 | Capa        | Tecnología                        |
 |-------------|-----------------------------------|
 | Frontend    | Next.js + Tailwind CSS            |
-| Bot         | Node.js + whatsapp-web.js         |
+| Bot         | Node.js + @whiskeysockets/baileys |
 | Base datos  | PostgreSQL (Docker local / Supabase prod) |
 | ORM         | Prisma (compartido frontend ↔ bot)|
 
@@ -30,7 +30,7 @@ birthday-wabot/
 │   ├── components/
 │   └── package.json
 │
-├── bot/                    ← Node.js + whatsapp-web.js
+├── bot/                    ← Node.js + @whiskeysockets/baileys
 │   ├── index.js            ← Punto de entrada del bot
 │   ├── scheduler.js        ← Cron de envío diario
 │   └── package.json
@@ -111,6 +111,7 @@ Ver [TASKS.md](./TASKS.md) para el progreso actual.
 ## 📝 Notas
 
 - **Frontend y bot son independientes**, se comunican únicamente a través de la base de datos vía Prisma.
-- El bot **no tiene interfaz gráfica**, corre en background.
+- El bot usa **Baileys** (WebSocket nativo de WhatsApp), **no requiere navegador ni Chrome**.
+- El bot no tiene interfaz gráfica propia, se gestiona con `wabot_manager.py` (GUI opcional para Windows).
 - La carpeta `legacy/` contiene el código Python original como referencia y **no debe modificarse**.
 - En producción se usa **Supabase** como base de datos PostgreSQL gestionada.

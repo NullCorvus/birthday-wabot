@@ -8,7 +8,7 @@ set "INSTALL_DIR=C:\Program Files\BirthdayWabot"
 set "REPO_URL=https://github.com/NullCorvus/birthday-wabot.git"
 set "NSSM_URL=https://nssm.cc/release/nssm-2.24.zip"
 set "LOG_FILE=%TEMP%\birthday-wabot-install.log"
-set "TOTAL_STEPS=11"
+set "TOTAL_STEPS=10"
 set "STEP=0"
 set "HAS_WINGET=0"
 set "NODE_PATH="
@@ -23,7 +23,7 @@ echo  :                                                     :
 echo  :    Birthday WaBot - Instalador Completo             :
 echo  :                                                     :
 echo  :    Este script instalara TODO lo necesario:          :
-echo  :      - Node.js, Git, Chrome (si no estan)           :
+echo  :      - Node.js, Git (si no estan)                    :
 echo  :      - NSSM, dependencias, servicio Windows         :
 echo  :                                                     :
 echo  +=====================================================+
@@ -219,80 +219,7 @@ echo [%date% %time%] Git !GIT_VER! listo >> "%LOG_FILE%"
 :git_ready
 
 :: ==============================================================
-:: PASO 4: Google Chrome
-:: ==============================================================
-set /a STEP+=1
-echo.
-echo  [Paso !STEP!/%TOTAL_STEPS%] Verificando Google Chrome...
-echo [%date% %time%] PASO !STEP!: Verificando Chrome >> "%LOG_FILE%"
-
-set "CHROME_OK=0"
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_OK=1"
-
-if "!CHROME_OK!"=="0" (
-    if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_OK=1"
-)
-
-if "!CHROME_OK!"=="1" (
-    echo           OK - Chrome ya instalado.
-    echo [%date% %time%] Chrome: ya instalado >> "%LOG_FILE%"
-    goto :chrome_ready
-)
-
-echo           Chrome NO encontrado. Instalando...
-echo [%date% %time%] Chrome: no encontrado, instalando >> "%LOG_FILE%"
-
-if "!HAS_WINGET!"=="1" (
-    echo           Usando winget...
-    echo [%date% %time%] Intentando winget install Chrome >> "%LOG_FILE%"
-    winget install Google.Chrome --silent --accept-package-agreements --accept-source-agreements >> "%LOG_FILE%" 2>&1
-    if !errorlevel! equ 0 (
-        echo           Winget: Chrome instalado.
-        echo [%date% %time%] winget Chrome: OK >> "%LOG_FILE%"
-        goto :chrome_verify
-    )
-    echo           Winget fallo, intentando descarga directa...
-    echo [%date% %time%] winget Chrome: fallo >> "%LOG_FILE%"
-)
-
-echo           Descargando Chrome desde Google...
-echo [%date% %time%] Descargando Chrome directamente >> "%LOG_FILE%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ^
-    try { ^
-        $url = 'https://dl.google.com/chrome/install/latest/chrome_installer.exe'; ^
-        $out = Join-Path $env:TEMP 'chrome_installer.exe'; ^
-        Write-Host '           Descargando...'; ^
-        Invoke-WebRequest -Uri $url -OutFile $out -TimeoutSec 120; ^
-        Write-Host '           Instalando (silencioso)...'; ^
-        Start-Process $out -ArgumentList '/silent /install' -Wait; ^
-        Write-Host '           Listo.'; ^
-        Remove-Item $out -Force -ErrorAction SilentlyContinue; ^
-    } catch { ^
-        Write-Host \"ERROR: $_\"; exit 1; ^
-    }"
-echo [%date% %time%] Descarga directa Chrome completada >> "%LOG_FILE%"
-
-:chrome_verify
-set "CHROME_OK=0"
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_OK=1"
-if "!CHROME_OK!"=="0" (
-    if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_OK=1"
-)
-
-if "!CHROME_OK!"=="1" (
-    echo           OK - Chrome instalado.
-    echo [%date% %time%] Chrome: instalado >> "%LOG_FILE%"
-) else (
-    echo           [AVISO] Chrome no se pudo instalar. Descargalo de:
-    echo           https://www.google.com/chrome
-    echo [%date% %time%] AVISO: Chrome no se pudo instalar >> "%LOG_FILE%"
-)
-
-:chrome_ready
-
-:: ==============================================================
-:: PASO 5: Crear directorio de instalacion
+:: PASO 4: Crear directorio de instalacion
 :: ==============================================================
 set /a STEP+=1
 echo.

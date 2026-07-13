@@ -25,6 +25,27 @@ Thumbs.db
 # WhatsApp session
 .wwebjs_auth/
 .wwebjs_cache/
+bot/auth_info_baileys/
+bot/status.json
+bot/qr.png
+bot/.trigger_send
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Old PyInstaller specs (obsolete)
+WabotManager.spec
+WabotManagerV2.spec
+WabotManagerV3.spec
+WabotDashboard.spec
+
+# Legacy Python bot code
+legacy/
+
+# Temp files
+query
+test_push.py
 
 # Docker
 pgdata/

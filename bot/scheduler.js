@@ -66,15 +66,13 @@ async function processBirthdays(client, forceSend = false) {
         // Proceder a enviar
         const message = templateText.replace(/{nombre}/g, contact.nombre);
         
-        // WhatsApp format is usually CountryCode+Number@c.us, e.g. 573213774603@c.us
-        // Remove spaces, + and non-digits from the phone number
         const cleanNumber = contact.numero.replace(/\D/g, '');
-        const chatId = `${cleanNumber}@c.us`;
+        const jid = `${cleanNumber}@s.whatsapp.net`;
 
-        console.log(`[SCHEDULER] Intentando enviar a ${contact.nombre} (${chatId}). Intento ${failedCount + 1}/3...`);
-        
+        console.log(`[SCHEDULER] Intentando enviar a ${contact.nombre} (${jid}). Intento ${failedCount + 1}/3...`);
+
         try {
-          await client.sendMessage(chatId, message);
+          await client.sendMessage(jid, { text: message });
           
           await prisma.log.create({
             data: {
