@@ -6,6 +6,7 @@ import time
 import shutil
 import json
 import traceback
+import urllib.request
 import customtkinter as ctk
 from tkinter import messagebox
 from tkinter import Canvas
@@ -106,16 +107,16 @@ class VerticalStepper(ctk.CTkFrame):
             canvas.create_line(8, 8, 16, 16, fill="white", width=2)
             canvas.create_line(16, 8, 8, 16, fill="white", width=2)
 
-    def set_step_status(self, index, status):
+    def set_step_status(self, index, status, custom_text=None):
         widget = self.step_widgets[index]
         self._draw_circle(widget["canvas"], status)
         
         if status == "running":
             widget["label"].configure(text_color=COLOR_TEXT)
-            widget["sub_label"].configure(text="Procesando...", text_color=COLOR_PURPLE)
+            widget["sub_label"].configure(text=custom_text or "Procesando...", text_color=COLOR_PURPLE)
         elif status == "done":
             widget["label"].configure(text_color=COLOR_TEXT)
-            widget["sub_label"].configure(text="Completado", text_color=COLOR_GREEN)
+            widget["sub_label"].configure(text=custom_text or "Completado", text_color=COLOR_GREEN)
         elif status == "error":
             widget["label"].configure(text_color=COLOR_RED)
             widget["sub_label"].configure(text="Error", text_color=COLOR_RED)
@@ -133,12 +134,12 @@ class WabotManagerApp(ctk.CTk):
         
         # Set Window Icon for Taskbar
         try:
-            icon_path = os.path.join(get_bundle_dir(), "wabot_icon_blue.ico")
+            icon_path = os.path.join(get_bundle_dir(), "logo.ico")
             if os.path.exists(icon_path):
                 self.iconbitmap(icon_path)
             else:
                 # Fallback to the current directory if running uncompiled
-                local_icon = os.path.join(os.path.dirname(__file__), "wabot_icon_blue.ico")
+                local_icon = os.path.join(os.path.dirname(__file__), "logo.ico")
                 if os.path.exists(local_icon):
                     self.iconbitmap(local_icon)
         except:
@@ -168,6 +169,7 @@ class WabotManagerApp(ctk.CTk):
         self.read_logs()
         self.monitor_qr()
         self.monitor_status()
+        self.check_initial_install_status()
         
     def setup_tab_config(self):
         self.tab_config.grid_columnconfigure(0, weight=6)
@@ -213,11 +215,11 @@ class WabotManagerApp(ctk.CTk):
         actions_frame.grid_columnconfigure(0, weight=1)
         actions_frame.grid_columnconfigure(1, weight=1)
         
-        btn_install = ctk.CTkButton(actions_frame, text="Instalar Bot", fg_color=COLOR_PURPLE, hover_color=COLOR_PURPLE_HOVER, height=45, corner_radius=8, font=ctk.CTkFont(size=14, weight="bold"), command=self.install_bot_thread)
-        btn_install.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        self.btn_install = ctk.CTkButton(actions_frame, text="Instalar Bot", fg_color=COLOR_PURPLE, hover_color=COLOR_PURPLE_HOVER, height=45, corner_radius=8, font=ctk.CTkFont(size=14, weight="bold"), command=self.install_bot_thread)
+        self.btn_install.grid(row=0, column=0, sticky="ew", padx=(0, 5))
         
-        btn_uninstall = ctk.CTkButton(actions_frame, text="Desinstalar Bot", fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER, height=45, corner_radius=8, font=ctk.CTkFont(size=14, weight="bold"), command=self.uninstall_bot_thread)
-        btn_uninstall.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+        self.btn_uninstall = ctk.CTkButton(actions_frame, text="Desinstalar Bot", fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER, height=45, corner_radius=8, font=ctk.CTkFont(size=14, weight="bold"), command=self.uninstall_bot_thread)
+        self.btn_uninstall.grid(row=0, column=1, sticky="ew", padx=(5, 0))
         
         push_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
         push_frame.pack(fill="x", pady=(0, 15), padx=5)
@@ -398,6 +400,16 @@ class WabotManagerApp(ctk.CTk):
             self.log(traceback.format_exc())
             self.after(0, lambda: messagebox.showerror("Error Inesperado", f"Ocurrio un error inesperado:\n\n{e}\n\nRevisa la pestaña 'Consola / Logs' para mas detalles."))
 
+    def rollback_install(self, error_msg=None):
+        self.log("[AVISO] Revirtiendo cambios de instalacion fallida para mantener el sistema limpio...")
+        try:
+            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+        except:
+            pass
+        self.after(0, self.check_initial_install_status)
+        if error_msg:
+            self.after(0, lambda: messagebox.showerror("Error de Instalacion", error_msg))
+
     def _do_install_bot(self):
         # 1. Copiar Archivos
         self.log("[PASO 1/5] Iniciando: Copiar Archivos")
@@ -413,6 +425,7 @@ class WabotManagerApp(ctk.CTk):
             except Exception as e:
                 self.log(f"Error limpiando carpeta: {e}")
                 self.update_task_ui(1, 'error')
+                self.rollback_install("No se pudo limpiar la carpeta de instalacion. Cerra programas que puedan estar usandola.")
                 return
 
         required_files = [
@@ -427,6 +440,7 @@ class WabotManagerApp(ctk.CTk):
                 self.log(f"  - {f}")
             self.log("[ERROR] Asegurate de que el .exe incluya los archivos bot/, prisma/ y package.json")
             self.update_task_ui(1, 'error')
+            self.rollback_install("No se encontraron los archivos fuente. El .exe puede estar corrupto.")
             return
         self.log("[INFO] Todos los archivos fuente encontrados.")
 
@@ -483,26 +497,88 @@ svc.install();
         self.update_task_ui(1, 'done')
         self.log("[PASO 1/5] Completado: Copiar Archivos")
 
-        # 2. Verificar Node.js y NPM Install Raiz
+        # Copiar el Manager .exe y crear accesos directos
+        current_exe = os.path.abspath(sys.argv[0])
+        manager_dest = os.path.join(INSTALL_DIR, "BirthdayWabotManager.exe")
+
+        if current_exe.lower().endswith(".exe") and current_exe.lower() != manager_dest.lower():
+            try:
+                shutil.copy2(current_exe, manager_dest)
+                self.log("[INFO] Manager .exe respaldado en la carpeta de instalacion.")
+
+                icon_dest = os.path.join(INSTALL_DIR, "logo.ico").replace("\\", "\\\\")
+                mgr = manager_dest.replace("\\", "\\\\")
+                ps_cmd = (
+                    "$ws = New-Object -ComObject WScript.Shell; "
+                    f"$d = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\\\\Birthday Wabot Manager.lnk'); "
+                    f"$d.TargetPath = '{mgr}'; "
+                    f"$d.IconLocation = '{icon_dest}'; "
+                    "$d.Save(); "
+                    f"$s = $ws.CreateShortcut([Environment]::GetFolderPath('Programs') + '\\\\Birthday Wabot Manager.lnk'); "
+                    f"$s.TargetPath = '{mgr}'; "
+                    f"$s.IconLocation = '{icon_dest}'; "
+                    "$s.Save();"
+                )
+                self.run_command(f'powershell -Command "{ps_cmd}"')
+                self.log("[INFO] Accesos directos creados en Escritorio y Menu de Inicio.")
+            except Exception as e:
+                self.log(f"[AVISO] No se pudieron crear los accesos directos: {e}")
+
         self.log("[PASO 2/5] Iniciando: Instalar Dependencias")
         self.update_task_ui(2, 'running')
 
         self.log("[INFO] Verificando Node.js...")
-        if self.run_command("node --version") != 0:
-            self.log("[ERROR] Node.js no esta instalado o no esta en el PATH.")
-            self.log("[ERROR] Instala Node.js desde https://nodejs.org y vuelve a intentar.")
-            self.update_task_ui(2, 'error')
-            return
+        needs_install = False
+        try:
+            result = subprocess.run(["node", "--version"], capture_output=True, text=True)
+            if result.returncode == 0:
+                ver_str = result.stdout.strip().lstrip("v")
+                parts = ver_str.split(".")
+                major = int(parts[0])
+                minor = int(parts[1]) if len(parts) > 1 else 0
+                if major > 20 or (major == 20 and minor >= 19):
+                    self.log(f"[INFO] Node.js {ver_str} detectado.")
+                else:
+                    self.log(f"[AVISO] Node.js {ver_str} es muy antiguo (requiere >=20.19). Actualizando...")
+                    needs_install = True
+            else:
+                needs_install = True
+        except:
+            needs_install = True
+
+        if needs_install:
+            self.log("[AVISO] Iniciando descarga e instalacion automatica de Node.js (esto puede tardar unos minutos)...")
+            try:
+                msi_path = os.path.join(APP_CONFIG_DIR, "node_installer.msi")
+                self.log("[INFO] Consultando ultima version LTS de Node.js...")
+                idx = json.loads(urllib.request.urlopen("https://nodejs.org/dist/index.json").read())
+                lts = next(item for item in idx if item["lts"] is not False)
+                ver = lts["version"]
+                url = f"https://nodejs.org/dist/{ver}/node-{ver}-x64.msi"
+                self.log(f"[INFO] Version detectada: {ver}")
+                self.log("[INFO] Descargando...")
+                urllib.request.urlretrieve(url, msi_path)
+                self.log("[INFO] Descarga completada. Instalando Node.js (por favor espera, ventana invisible)...")
+                subprocess.run(["msiexec.exe", "/i", msi_path, "/qn"], check=True)
+                self.log("[INFO] Instalacion de Node.js completada.")
+                os.environ["PATH"] += os.pathsep + r"C:\Program Files\nodejs"
+            except Exception as e:
+                self.log(f"[ERROR] Fallo la instalacion automatica de Node.js: {e}")
+                self.update_task_ui(2, 'error')
+                self.rollback_install(f"Fallo la instalacion automatica de Node.js: {e}")
+                return
         self.log("[INFO] Verificando npm...")
         if self.run_command("npm --version") != 0:
             self.log("[ERROR] npm no esta instalado o no esta en el PATH.")
             self.update_task_ui(2, 'error')
+            self.rollback_install("npm no esta disponible. Reinstala Node.js manualmente desde https://nodejs.org")
             return
 
         self.log("[INFO] Instalando dependencias (npm install)...")
         if self.run_command("npm install", cwd=INSTALL_DIR) != 0:
             self.log("[ERROR] npm install fallo. Revisa tu conexion a internet.")
             self.update_task_ui(2, 'error')
+            self.rollback_install("npm install fallo. Revisa tu conexion a internet y que Node.js sea >=20.19.")
             return
         self.update_task_ui(2, 'done')
         self.log("[PASO 2/5] Completado: Instalar Dependencias")
@@ -514,6 +590,7 @@ svc.install();
         if self.run_command("npx prisma generate", cwd=INSTALL_DIR) != 0:
             self.log("[ERROR] prisma generate fallo. Revisa la URL de la base de datos.")
             self.update_task_ui(3, 'error')
+            self.rollback_install("prisma generate fallo. Revisa la URL de la base de datos en la pestana Configuracion.")
             return
         self.update_task_ui(3, 'done')
         self.log("[PASO 3/5] Completado: Generar Cliente Prisma")
@@ -530,6 +607,7 @@ svc.install();
                 res = messagebox.askyesno("Aviso", "El push de base de datos fallo.\nContinuar de todos modos si las tablas ya existen?")
                 if not res:
                     self.update_task_ui(4, 'error')
+                    self.rollback_install("Instalacion cancelada: el push de base de datos fallo.")
                     return
             self.update_task_ui(4, 'done')
             self.log("[PASO 4/5] Completado: Crear Tablas en BD")
@@ -548,17 +626,20 @@ svc.install();
         if self.run_command("npm install", cwd=bot_dir) != 0:
             self.log("[ERROR] npm install en bot fallo.")
             self.update_task_ui(5, 'error')
+            self.rollback_install("npm install en el directorio bot fallo. Revisa tu conexion a internet.")
             return
         self.run_command("npm install node-windows", cwd=bot_dir)
         if self.run_command("node install-service.js", cwd=bot_dir) != 0:
             self.log("[ERROR] No se pudo instalar el servicio de Windows.")
             self.update_task_ui(5, 'error')
+            self.rollback_install("No se pudo instalar el servicio de Windows. Ejecuta el programa como Administrador.")
             return
         self.update_task_ui(5, 'done')
         self.log("[PASO 5/5] Completado: Instalar Servicio Windows")
 
         self.log("\n=== INSTALACION COMPLETADA EXITOSAMENTE ===")
         self.after(0, lambda: messagebox.showinfo("Exito", "El Bot se ha instalado. Ve a la pestana 'Conexion WhatsApp' para escanear el QR."))
+        self.after(0, self.check_initial_install_status)
 
     def uninstall_bot_thread(self):
         if not is_admin():
@@ -602,9 +683,24 @@ svc.uninstall();
             self.log("Carpeta de instalacion eliminada.")
         except Exception as e:
             self.log(f"No se pudo borrar todo: {e}")
-            
+
+        # Borrar accesos directos
+        try:
+            ps_cmd = "$p1 = [Environment]::GetFolderPath('Desktop') + '\\Birthday Wabot Manager.lnk'; $p2 = [Environment]::GetFolderPath('Programs') + '\\Birthday Wabot Manager.lnk'; if (Test-Path $p1) { Remove-Item $p1 }; if (Test-Path $p2) { Remove-Item $p2 }"
+            self.run_command(['powershell', '-Command', ps_cmd])
+        except:
+            pass
+
         self.log("=== DESINSTALACION COMPLETADA ===")
-        messagebox.showinfo("Éxito", "Desinstalación completa.")
+
+        def finish_uninstall_ui():
+            for i in range(len(self.stepper.steps)):
+                self.stepper.set_step_status(i, "pending", custom_text="Pendiente")
+            self.btn_install.configure(state="normal")
+            self.btn_uninstall.configure(state="disabled", fg_color=COLOR_BG)
+            messagebox.showinfo("Éxito", "Desinstalación completa.")
+
+        self.after(0, finish_uninstall_ui)
 
     # -----------------------------------------------------------------------
     # Monitoreo
@@ -620,6 +716,19 @@ svc.uninstall();
                 self.lbl_svc_status.configure(text="● NO INSTALADO", text_color=COLOR_TEXT_MUTED)
         except:
             self.lbl_svc_status.configure(text="● DESCONOCIDO", text_color=COLOR_TEXT_MUTED)
+
+    def check_initial_install_status(self):
+        bot_script = os.path.join(INSTALL_DIR, "bot", "index.js")
+        if os.path.exists(bot_script):
+            for i in range(len(self.stepper.steps)):
+                self.stepper.set_step_status(i, "done", custom_text="Ya Instalado")
+            self.btn_install.configure(state="disabled", fg_color=COLOR_BG)
+            self.btn_uninstall.configure(state="normal")
+        else:
+            for i in range(len(self.stepper.steps)):
+                self.stepper.set_step_status(i, "pending", custom_text="Pendiente")
+            self.btn_install.configure(state="normal")
+            self.btn_uninstall.configure(state="disabled", fg_color=COLOR_BG)
 
     def monitor_status(self):
         self.update_status()

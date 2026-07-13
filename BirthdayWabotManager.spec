@@ -6,7 +6,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('wabot_icon_blue.ico', '.'),
+        ('logo.ico', '.'),
         ('bot', 'bot'),
         ('prisma', 'prisma'),
         ('package.json', '.'),
@@ -42,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['wabot_icon_blue.ico'],
+    icon=['logo.ico'],
 )

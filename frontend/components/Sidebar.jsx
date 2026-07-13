@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
@@ -65,8 +66,8 @@ export default function Sidebar() {
   const sidebarContent = (
     <>
       <div className="flex items-center gap-2.5 px-5 py-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-white font-bold text-sm">
-          🎂
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl overflow-hidden">
+          <Image src="/logo.png" alt="Birthday WaBot Logo" width={36} height={36} className="object-contain" />
         </div>
         <div>
           <h1 className="text-sm font-bold text-zinc-900 dark:text-white leading-tight">Birthday</h1>

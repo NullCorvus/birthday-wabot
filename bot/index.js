@@ -1,4 +1,5 @@
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { exec } = require('child_process');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
@@ -117,6 +118,12 @@ async function connectToWhatsApp() {
                 cleanAuth();
                 birthdaysProcessed = false;
                 reconnectAttempts = 0;
+
+                const msgCommand = `msg * "ATENCION: La sesion de WhatsApp del bot se ha cerrado. Busca 'Birthday Wabot Manager' en tu Escritorio o Menu de Inicio, abrelo y escanea el QR nuevamente."`;
+                exec(msgCommand, (error) => {
+                    if (error) console.error("Error al mostrar la alerta:", error);
+                });
+
                 setTimeout(connectToWhatsApp, 3000);
                 return;
             }
