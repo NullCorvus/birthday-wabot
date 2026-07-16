@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['wabot_manager.py'],
+    ['wabot_manager_pre.py'],
     pathex=[],
     binaries=[],
     datas=[
@@ -12,7 +12,6 @@ a = Analysis(
         ('package.json', '.'),
         ('package-lock.json', '.'),
         ('prisma.config.ts', '.'),
-        ('.env.preconfigured', '.env'),
     ],
     hiddenimports=[],
     hookspath=[],

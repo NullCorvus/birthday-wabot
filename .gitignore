@@ -47,6 +47,9 @@ legacy/
 query
 test_push.py
 
+# Pre-configured manager (contains hardcoded credentials)
+wabot_manager_pre.py
+
 # Docker
 pgdata/
 
