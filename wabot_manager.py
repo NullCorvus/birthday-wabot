@@ -172,12 +172,18 @@ class WabotManagerApp(ctk.CTk):
         self.check_initial_install_status()
         
     def setup_tab_config(self):
-        self.tab_config.grid_columnconfigure(0, weight=6)
-        self.tab_config.grid_columnconfigure(1, weight=4)
+        self.tab_config.grid_columnconfigure(0, weight=1)
         self.tab_config.grid_rowconfigure(0, weight=1)
         
+        scroll_container = ctk.CTkScrollableFrame(self.tab_config, fg_color="transparent")
+        scroll_container.grid(row=0, column=0, sticky="nsew")
+
+        scroll_container.grid_columnconfigure(0, weight=6)
+        scroll_container.grid_columnconfigure(1, weight=4)
+        scroll_container.grid_rowconfigure(0, weight=1)
+        
         # === LEFT PANEL ===
-        left_panel = ctk.CTkFrame(self.tab_config, fg_color="transparent")
+        left_panel = ctk.CTkFrame(scroll_container, fg_color="transparent")
         left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
         # Supabase Config Card
@@ -249,7 +255,7 @@ class WabotManagerApp(ctk.CTk):
         self.stepper.pack(fill="both", expand=True, padx=20, pady=(0, 15))
         
         # === RIGHT PANEL ===
-        right_panel = ctk.CTkFrame(self.tab_config, fg_color="transparent")
+        right_panel = ctk.CTkFrame(scroll_container, fg_color="transparent")
         right_panel.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
         # System Info Card
@@ -448,7 +454,19 @@ class WabotManagerApp(ctk.CTk):
         bot_dir = os.path.join(INSTALL_DIR, "bot")
         os.makedirs(bot_dir, exist_ok=True)
 
-        shutil.copy2(os.path.join(APP_CONFIG_DIR, ".env") if os.path.exists(os.path.join(APP_CONFIG_DIR, ".env")) else os.path.join(source_dir, ".env"), os.path.join(INSTALL_DIR, ".env"))
+        env_app = os.path.join(APP_CONFIG_DIR, ".env")
+        env_src = os.path.join(source_dir, ".env")
+        env_dst = os.path.join(INSTALL_DIR, ".env")
+
+        if os.path.exists(env_app):
+            shutil.copy2(env_app, env_dst)
+        elif os.path.exists(env_src):
+            shutil.copy2(env_src, env_dst)
+        else:
+            self.log("[ERROR] No se encontro archivo .env en la configuracion ni en el paquete.")
+            self.update_task_ui(1, 'error')
+            self.rollback_install("No se encontro el archivo .env. Configura las credenciales antes de instalar.")
+            return
 
         for item in ["package.json", "package-lock.json", "prisma.config.ts"]:
             src = os.path.join(source_dir, item)
@@ -549,6 +567,7 @@ svc.install();
         if needs_install:
             self.log("[AVISO] Iniciando descarga e instalacion automatica de Node.js (esto puede tardar unos minutos)...")
             try:
+                os.makedirs(APP_CONFIG_DIR, exist_ok=True)
                 msi_path = os.path.join(APP_CONFIG_DIR, "node_installer.msi")
                 self.log("[INFO] Consultando ultima version LTS de Node.js...")
                 idx = json.loads(urllib.request.urlopen("https://nodejs.org/dist/index.json").read())
@@ -684,6 +703,13 @@ svc.uninstall();
         except Exception as e:
             self.log(f"No se pudo borrar todo: {e}")
 
+        try:
+            if os.path.exists(APP_CONFIG_DIR):
+                shutil.rmtree(APP_CONFIG_DIR, ignore_errors=True)
+                self.log("Carpeta de configuracion eliminada.")
+        except Exception as e:
+            self.log(f"No se pudo borrar la configuracion: {e}")
+
         # Borrar accesos directos
         try:
             ps_cmd = "$p1 = [Environment]::GetFolderPath('Desktop') + '\\Birthday Wabot Manager.lnk'; $p2 = [Environment]::GetFolderPath('Programs') + '\\Birthday Wabot Manager.lnk'; if (Test-Path $p1) { Remove-Item $p1 }; if (Test-Path $p2) { Remove-Item $p2 }"
@@ -790,5 +816,12 @@ svc.uninstall();
         self.after(3000, self.monitor_qr)
 
 if __name__ == "__main__":
+    import ctypes
+    if not is_admin():
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, " ".join(sys.argv), None, 1
+        )
+        sys.exit()
+
     app = WabotManagerApp()
     app.mainloop()
