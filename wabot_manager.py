@@ -318,15 +318,29 @@ class WabotManagerApp(ctk.CTk):
     def load_env(self):
         env_path = os.path.join(APP_CONFIG_DIR, ".env")
         if not os.path.exists(env_path):
-            env_path = os.path.join(get_bundle_dir(), ".env")
+            bundle_env = os.path.join(get_bundle_dir(), ".env")
+            if os.path.exists(bundle_env):
+                try:
+                    result = subprocess.run(
+                        ["cmd", "/c", "type", bundle_env],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace"
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        os.makedirs(APP_CONFIG_DIR, exist_ok=True)
+                        with open(env_path, "w", encoding="utf-8") as f:
+                            f.write(result.stdout)
+                except Exception:
+                    pass
         if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                for line in lines:
-                    if line.startswith("DATABASE_URL="):
-                        self.db_url_var.set(line.split("=")[1].strip().strip('"').strip("'"))
-                    elif line.startswith("DIRECT_URL="):
-                        self.direct_url_var.set(line.split("=")[1].strip().strip('"').strip("'"))
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("DATABASE_URL="):
+                            self.db_url_var.set(line.split("=", 1)[1].strip().strip('"').strip("'"))
+                        elif line.startswith("DIRECT_URL="):
+                            self.direct_url_var.set(line.split("=", 1)[1].strip().strip('"').strip("'"))
+            except PermissionError:
+                pass
 
     def save_env(self):
         env_path = os.path.join(APP_CONFIG_DIR, ".env")
@@ -461,7 +475,7 @@ class WabotManagerApp(ctk.CTk):
         if os.path.exists(env_app):
             shutil.copy2(env_app, env_dst)
         elif os.path.exists(env_src):
-            shutil.copy2(env_src, env_dst)
+            shutil.copy(env_src, env_dst)
         else:
             self.log("[ERROR] No se encontro archivo .env en la configuracion ni en el paquete.")
             self.update_task_ui(1, 'error')
